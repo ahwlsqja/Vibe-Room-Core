@@ -451,3 +451,161 @@ fn nine_fork_mip4_reserve_dipped() {
         reserve_result
     );
 }
+
+// ─── Comprehensive NINE FORK Test: MIP-3 + MIP-4 + MIP-5 ─────────────────
+
+/// Comprehensive NINE FORK integration test exercising MIP-3, MIP-4, and MIP-5
+/// through the same executor and state infrastructure in a single test.
+///
+/// This proves all three MIP features coexist and function correctly:
+///
+/// 1. **MIP-5 (CLZ):** Deploys a contract with CLZ opcode, verifies result via SSTORE.
+/// 2. **MIP-3 (Memory):** Executes nested CALL/REVERT, verifies memory isolation.
+/// 3. **MIP-4 (Reserve):** Calls precompile at 0x20 via STATICCALL, verifies result.
+///
+/// All three transactions share the same InMemoryState foundation, proving
+/// the features don't interfere with each other.
+#[test]
+fn test_nine_fork_comprehensive() {
+    use monad_nine_fork::mip4_reserve::reset_dipped_tracker;
+    use monad_nine_fork::nine_fork_precompiles::execute_with_nine_fork_precompiles;
+
+    // --- Shared state setup ---
+    let clz_deployer = sender();
+    let parent_addr = Address::with_last_byte(0x60);
+    let sub_addr = Address::with_last_byte(0x61);
+    let mip4_caller_addr = Address::with_last_byte(0x62);
+    let mip4_target_addr = Address::with_last_byte(0x63);
+
+    let parent_value = U256::from(0xAAAAu64);
+    let sub_value = U256::from(0xBBBBu64);
+
+    // Build CLZ deploy bytecode: CLZ(0x100) should give 247 leading zeros
+    let clz_value = U256::from(0x100u64);
+    let clz_expected = U256::from(247u64);
+    let mut clz_bytecode = Vec::new();
+    clz_bytecode.push(0x7F); // PUSH32
+    clz_bytecode.extend_from_slice(&clz_value.to_be_bytes::<32>());
+    clz_bytecode.push(0x1E); // CLZ
+    clz_bytecode.push(0x60); clz_bytecode.push(0x00); // PUSH1 0 (slot)
+    clz_bytecode.push(0x55); // SSTORE
+    clz_bytecode.push(0x60); clz_bytecode.push(0x00); // PUSH1 0
+    clz_bytecode.push(0x60); clz_bytecode.push(0x00); // PUSH1 0
+    clz_bytecode.push(0xF3); // RETURN
+
+    // Set up state with all required accounts
+    let state = InMemoryState::new()
+        .with_account(clz_deployer, AccountInfo::new(U256::from(10_000_000_000u64), 0))
+        .with_account(parent_addr, account_with_code(
+            build_memory_test_parent(parent_value, sub_addr),
+        ))
+        .with_account(sub_addr, account_with_code(build_mstore_revert(sub_value)))
+        .with_account(mip4_caller_addr, account_with_code(
+            build_mip4_caller(mip4_target_addr),
+        ));
+
+    // === Transaction 1: MIP-5 CLZ ===
+    let clz_tx = Transaction {
+        sender: clz_deployer,
+        to: None, // CREATE
+        value: U256::ZERO,
+        data: Bytes::from(clz_bytecode),
+        gas_limit: 1_000_000,
+        nonce: 0,
+        gas_price: U256::ZERO,
+    };
+
+    let (clz_result, clz_state_changes) =
+        EvmExecutor::execute_tx_with_state_changes(&clz_tx, &state, &BlockEnv::default())
+            .expect("MIP-5 CLZ transaction should not error");
+
+    assert!(clz_result.is_success(), "MIP-5 CLZ deploy should succeed: {:?}", clz_result);
+
+    // Find deployed contract and verify CLZ result
+    let clz_contract = clz_state_changes
+        .iter()
+        .find(|(addr, (_, storage))| **addr != clz_deployer && !storage.is_empty())
+        .expect("Should find deployed CLZ contract with storage");
+
+    let (_, (_, clz_storage)) = clz_contract;
+    let clz_stored = clz_storage.get(&U256::ZERO).expect("CLZ result at slot 0");
+    assert_eq!(
+        *clz_stored, clz_expected,
+        "MIP-5: CLZ(0x100) should be 247, got {}",
+        clz_stored
+    );
+
+    // === Transaction 2: MIP-3 Memory Isolation ===
+    let mem_tx = Transaction {
+        sender: clz_deployer,
+        to: Some(parent_addr),
+        value: U256::ZERO,
+        data: Bytes::new(),
+        gas_limit: 1_000_000,
+        nonce: 0,
+        gas_price: U256::ZERO,
+    };
+
+    let (mem_result, mem_state_changes) =
+        EvmExecutor::execute_tx_with_state_changes(&mem_tx, &state, &BlockEnv::default())
+            .expect("MIP-3 memory transaction should not error");
+
+    assert!(mem_result.is_success(), "MIP-3 memory test should succeed: {:?}", mem_result);
+
+    let (_, mem_storage) = mem_state_changes
+        .get(&parent_addr)
+        .expect("Parent should have state changes");
+
+    let mem_readback = mem_storage.get(&U256::ZERO).expect("Memory readback at slot 0");
+    assert_eq!(
+        *mem_readback, parent_value,
+        "MIP-3: Parent memory should be {:#x} after sub-REVERT, got {:#x}",
+        parent_value, mem_readback
+    );
+
+    let call_ok = mem_storage.get(&U256::from(1u64)).expect("Call success at slot 1");
+    assert_eq!(
+        *call_ok, U256::ZERO,
+        "MIP-3: CALL to reverting sub should return 0"
+    );
+
+    // === Transaction 3: MIP-4 Reserve Balance ===
+    reset_dipped_tracker();
+
+    let mip4_tx = Transaction {
+        sender: clz_deployer,
+        to: Some(mip4_caller_addr),
+        value: U256::ZERO,
+        data: Bytes::new(),
+        gas_limit: 1_000_000,
+        nonce: 0,
+        gas_price: U256::ZERO,
+    };
+
+    let (mip4_result, mip4_state_changes) =
+        execute_with_nine_fork_precompiles(&mip4_tx, &state, &BlockEnv::default())
+            .expect("MIP-4 reserve balance transaction should not error");
+
+    assert!(mip4_result.is_success(), "MIP-4 reserve balance test should succeed: {:?}", mip4_result);
+
+    let (_, mip4_storage) = mip4_state_changes
+        .get(&mip4_caller_addr)
+        .expect("MIP-4 caller should have state changes");
+
+    // STATICCALL should have succeeded
+    let staticcall_ok = mip4_storage.get(&U256::from(1u64)).expect("STATICCALL success at slot 1");
+    assert_eq!(
+        *staticcall_ok,
+        U256::from(1u64),
+        "MIP-4: STATICCALL to precompile 0x20 should succeed"
+    );
+
+    // Result should be 0x01 (NOT dipped = safe)
+    let reserve_result = mip4_storage.get(&U256::ZERO).expect("Reserve result at slot 0");
+    assert_eq!(
+        *reserve_result,
+        U256::from(1u64),
+        "MIP-4: Address that has NOT dipped should return 0x01, got {:#x}",
+        reserve_result
+    );
+}
