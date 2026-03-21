@@ -1,0 +1,12 @@
+[package]
+name = "monad-mv-state"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-version state (MVHashMap) for Block-STM parallel execution"
+
+[dependencies]
+monad-types = { path = "../types" }
+monad-state = { path = "../state" }
+alloy-primitives = { workspace = true }
+dashmap = "6.1"
+parking_lot = "0.12"

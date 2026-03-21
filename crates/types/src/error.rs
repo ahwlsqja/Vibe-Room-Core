@@ -31,6 +31,17 @@ pub enum EvmError {
     /// Reserve balance error (MIP-4).
     #[error("reserve balance error: {0}")]
     ReserveBalance(String),
+
+    /// A read hit an ESTIMATE marker in the MVHashMap during parallel execution.
+    /// The transaction at `tx_index` that previously wrote this location is being
+    /// re-executed. The scheduler should suspend the current transaction.
+    #[error("read hit ESTIMATE marker at tx_index {tx_index} for location {location}")]
+    ReadEstimate {
+        /// The transaction index whose write is currently being re-executed.
+        tx_index: u32,
+        /// String description of the state location that was read.
+        location: String,
+    },
 }
 
 #[cfg(test)]
