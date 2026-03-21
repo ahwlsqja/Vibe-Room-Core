@@ -14,9 +14,11 @@
 //!
 //! ## dippedIntoReserve Tracking
 //!
-//! For S02 (sequential-only execution), tracking uses a thread-local
-//! `RefCell<HashMap<Address, bool>>`. This will evolve to per-transaction-index
-//! tracking in S03/S04 for parallel execution.
+//! For S02 (sequential-only execution), backward-compatible free functions use
+//! `tx_index=0` to maintain thread-local semantics. For S03/S04 parallel
+//! execution, per-transaction-index tracking is available via the `_for_tx`
+//! function variants and the `DippedIntoReserve` struct methods that accept
+//! a `tx_index` parameter.
 //!
 //! ## Init-Selfdestruct Bypass
 //!
@@ -34,8 +36,8 @@ use alloy_primitives::{Address, Bytes};
 use revm::precompile::{
     Precompile, PrecompileError, PrecompileId, PrecompileOutput, PrecompileResult,
 };
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Address of the MIP-4 reserve balance precompile.
 ///
@@ -80,68 +82,106 @@ impl Default for ReserveBalanceConfig {
 
 /// Per-transaction tracking of which addresses have dipped into their reserve.
 ///
-/// For S02 (sequential execution), this uses a thread-local `RefCell<HashMap>`.
-/// S03/S04 will replace this with per-transaction-index tracking for parallel
-/// execution safety.
+/// Supports both legacy sequential mode (tx_index=0 for all) and parallel
+/// mode with per-transaction-index isolation. Uses `Mutex<HashMap<(u32, Address), bool>>`
+/// internally to support concurrent access from multiple worker threads.
 #[derive(Debug, Default)]
 pub struct DippedIntoReserve {
-    /// Maps address → whether it has dipped into reserve balance.
-    inner: RefCell<HashMap<Address, bool>>,
+    /// Maps (tx_index, address) → whether it has dipped into reserve balance.
+    inner: Mutex<HashMap<(u32, Address), bool>>,
 }
 
 impl DippedIntoReserve {
     /// Creates a new empty tracker.
     pub fn new() -> Self {
         Self {
-            inner: RefCell::new(HashMap::new()),
+            inner: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Records that an address has dipped into its reserve balance.
-    pub fn mark_dipped(&self, address: Address) {
-        self.inner.borrow_mut().insert(address, true);
+    /// Records that an address has dipped into its reserve balance for the given tx.
+    pub fn mark_dipped(&self, tx_index: u32, address: Address) {
+        self.inner
+            .lock()
+            .unwrap()
+            .insert((tx_index, address), true);
     }
 
-    /// Checks whether an address has dipped into its reserve balance.
+    /// Checks whether an address has dipped into its reserve balance for the given tx.
     ///
     /// Returns `true` if the address has dipped, `false` if it hasn't
     /// (or hasn't been tracked).
-    pub fn has_dipped(&self, address: &Address) -> bool {
-        self.inner.borrow().get(address).copied().unwrap_or(false)
+    pub fn has_dipped(&self, tx_index: u32, address: &Address) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .get(&(tx_index, *address))
+            .copied()
+            .unwrap_or(false)
     }
 
-    /// Resets the tracker for a new transaction.
+    /// Resets the tracker for a specific transaction index.
+    ///
+    /// Removes all entries for the given tx_index, leaving entries for
+    /// other transactions intact.
+    pub fn reset_tx(&self, tx_index: u32) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.retain(|&(tx, _), _| tx != tx_index);
+    }
+
+    /// Resets the tracker completely (all transaction indices).
     pub fn reset(&self) {
-        self.inner.borrow_mut().clear();
+        self.inner.lock().unwrap().clear();
     }
 }
 
 // Thread-local tracker for the current transaction context.
-// In S02, all execution is sequential, so thread-local is safe.
+// Uses Mutex internally for S03/S04 parallel safety.
 thread_local! {
     static DIPPED_TRACKER: DippedIntoReserve = DippedIntoReserve::new();
 }
 
+// ── Backward-compatible free functions (S02 — use tx_index=0) ──────────────
+
 /// Marks an address as having dipped into its reserve balance.
 ///
-/// Called by the execution pipeline when a balance transfer causes an account's
-/// balance to drop below the reserve threshold.
+/// Backward-compatible: uses tx_index=0 (S02 sequential mode).
+/// For parallel execution, use [`mark_address_dipped_for_tx`] instead.
 pub fn mark_address_dipped(address: Address) {
-    DIPPED_TRACKER.with(|tracker| tracker.mark_dipped(address));
+    DIPPED_TRACKER.with(|tracker| tracker.mark_dipped(0, address));
 }
 
 /// Queries whether an address has dipped into its reserve balance.
 ///
-/// Returns `true` if dipped, `false` if safe.
+/// Backward-compatible: uses tx_index=0 (S02 sequential mode).
+/// For parallel execution, use [`has_address_dipped_for_tx`] instead.
 pub fn has_address_dipped(address: &Address) -> bool {
-    DIPPED_TRACKER.with(|tracker| tracker.has_dipped(address))
+    DIPPED_TRACKER.with(|tracker| tracker.has_dipped(0, address))
 }
 
 /// Resets the dipped-into-reserve tracker for a new transaction.
 ///
-/// Must be called before each transaction to ensure clean state.
+/// Backward-compatible: clears all entries (S02 sequential mode).
+/// For parallel execution, use [`reset_dipped_tracker_for_tx`] instead.
 pub fn reset_dipped_tracker() {
     DIPPED_TRACKER.with(|tracker| tracker.reset());
+}
+
+// ── Per-tx-index free functions (S03/S04 — parallel mode) ──────────────────
+
+/// Marks an address as having dipped for a specific transaction index.
+pub fn mark_address_dipped_for_tx(tx_index: u32, address: Address) {
+    DIPPED_TRACKER.with(|tracker| tracker.mark_dipped(tx_index, address));
+}
+
+/// Queries whether an address has dipped for a specific transaction index.
+pub fn has_address_dipped_for_tx(tx_index: u32, address: &Address) -> bool {
+    DIPPED_TRACKER.with(|tracker| tracker.has_dipped(tx_index, address))
+}
+
+/// Resets the dipped tracker for a specific transaction index only.
+pub fn reset_dipped_tracker_for_tx(tx_index: u32) {
+    DIPPED_TRACKER.with(|tracker| tracker.reset_tx(tx_index));
 }
 
 /// Decodes an ABI-encoded address from 32 bytes of input.
@@ -448,5 +488,85 @@ mod tests {
             1_000_000_000_000_000_000,
             "Default threshold should be 1 ETH in wei"
         );
+    }
+
+    // ── Per-tx-index tracking tests (S03) ────────────────────────────────
+
+    #[test]
+    fn per_tx_index_isolation() {
+        reset_dipped_tracker();
+
+        let addr = Address::with_last_byte(0xE1);
+
+        // Mark dipped for tx_index=1 only
+        mark_address_dipped_for_tx(1, addr);
+
+        assert!(!has_address_dipped_for_tx(0, &addr), "tx 0 should not see tx 1's dip");
+        assert!(has_address_dipped_for_tx(1, &addr), "tx 1 should see its own dip");
+        assert!(!has_address_dipped_for_tx(2, &addr), "tx 2 should not see tx 1's dip");
+    }
+
+    #[test]
+    fn per_tx_index_multiple_txs_same_address() {
+        reset_dipped_tracker();
+
+        let addr = Address::with_last_byte(0xE2);
+
+        mark_address_dipped_for_tx(0, addr);
+        mark_address_dipped_for_tx(2, addr);
+
+        assert!(has_address_dipped_for_tx(0, &addr));
+        assert!(!has_address_dipped_for_tx(1, &addr));
+        assert!(has_address_dipped_for_tx(2, &addr));
+    }
+
+    #[test]
+    fn reset_dipped_tracker_for_tx_only_clears_that_tx() {
+        reset_dipped_tracker();
+
+        let addr = Address::with_last_byte(0xE3);
+
+        mark_address_dipped_for_tx(0, addr);
+        mark_address_dipped_for_tx(1, addr);
+
+        reset_dipped_tracker_for_tx(0);
+
+        assert!(!has_address_dipped_for_tx(0, &addr), "tx 0 should be cleared");
+        assert!(has_address_dipped_for_tx(1, &addr), "tx 1 should survive");
+    }
+
+    #[test]
+    fn backward_compat_uses_tx_index_zero() {
+        reset_dipped_tracker();
+
+        let addr = Address::with_last_byte(0xE4);
+
+        // Legacy API writes at tx_index=0
+        mark_address_dipped(addr);
+
+        // Should be visible via per-tx API at index 0
+        assert!(has_address_dipped_for_tx(0, &addr));
+        // But not at other indices
+        assert!(!has_address_dipped_for_tx(1, &addr));
+    }
+
+    #[test]
+    fn dipped_struct_direct_usage() {
+        let tracker = DippedIntoReserve::new();
+        let addr = Address::with_last_byte(0xE5);
+
+        tracker.mark_dipped(0, addr);
+        tracker.mark_dipped(1, addr);
+
+        assert!(tracker.has_dipped(0, &addr));
+        assert!(tracker.has_dipped(1, &addr));
+        assert!(!tracker.has_dipped(2, &addr));
+
+        tracker.reset_tx(0);
+        assert!(!tracker.has_dipped(0, &addr));
+        assert!(tracker.has_dipped(1, &addr));
+
+        tracker.reset();
+        assert!(!tracker.has_dipped(1, &addr));
     }
 }
