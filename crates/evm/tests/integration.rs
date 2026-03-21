@@ -102,10 +102,12 @@ fn integration_full_pipeline() {
     assert!(result.is_success(), "deploy should succeed: {:?}", result);
     assert!(result.gas_used() > 21_000, "deploy costs more than intrinsic gas");
 
-    // Find the deployed contract address (not the sender)
+    // Find the deployed contract address (has code and is not sender or zero address)
     let contract_entry = changes
         .iter()
-        .find(|(addr, _)| **addr != sender)
+        .find(|(addr, (info, _))| {
+            **addr != sender && info.code.as_ref().map_or(false, |c| !c.is_empty())
+        })
         .expect("deployed contract in state changes");
     let (_contract_addr, (contract_info, _)) = contract_entry;
 
