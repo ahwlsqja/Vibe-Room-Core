@@ -7,3 +7,7 @@ description = "Standard Ethereum precompiles for monad-core"
 [dependencies]
 monad-types = { path = "../types" }
 alloy-primitives = { workspace = true }
+revm = { version = "36", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+hex = "0.4"

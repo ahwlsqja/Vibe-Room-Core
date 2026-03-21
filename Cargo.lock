@@ -1417,6 +1417,7 @@ name = "monad-evm"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "hex",
  "monad-state",
  "monad-types",
  "revm",
@@ -1427,7 +1428,9 @@ name = "monad-precompiles"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "hex",
  "monad-types",
+ "revm",
 ]
 
 [[package]]
