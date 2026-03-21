@@ -1,0 +1,15 @@
+[package]
+name = "monad-nine-fork"
+version = "0.1.0"
+edition = "2021"
+description = "NINE FORK (MIP-3/4/5) compliance verification for monad-core EVM"
+
+[dependencies]
+monad-types = { path = "../types" }
+monad-evm = { path = "../evm" }
+monad-state = { path = "../state" }
+alloy-primitives = { workspace = true }
+revm = { version = "36", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+hex = "0.4"

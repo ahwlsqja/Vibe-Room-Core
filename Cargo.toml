@@ -5,6 +5,7 @@ members = [
     "crates/state",
     "crates/evm",
     "crates/precompiles",
+    "crates/nine-fork",
 ]
 
 [workspace.dependencies]
