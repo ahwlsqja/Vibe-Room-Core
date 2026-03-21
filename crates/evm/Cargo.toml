@@ -1,0 +1,10 @@
+[package]
+name = "monad-evm"
+version = "0.1.0"
+edition = "2021"
+description = "EVM execution engine for monad-core"
+
+[dependencies]
+monad-types = { path = "../types" }
+monad-state = { path = "../state" }
+alloy-primitives = { workspace = true }

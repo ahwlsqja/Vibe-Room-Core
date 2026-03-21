@@ -1,0 +1,9 @@
+[package]
+name = "monad-state"
+version = "0.1.0"
+edition = "2021"
+description = "State provider trait and in-memory backend for monad-core"
+
+[dependencies]
+monad-types = { path = "../types" }
+alloy-primitives = { workspace = true }

@@ -1,0 +1,9 @@
+[package]
+name = "monad-precompiles"
+version = "0.1.0"
+edition = "2021"
+description = "Standard Ethereum precompiles for monad-core"
+
+[dependencies]
+monad-types = { path = "../types" }
+alloy-primitives = { workspace = true }

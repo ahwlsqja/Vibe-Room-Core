@@ -1,0 +1,11 @@
+[package]
+name = "monad-types"
+version = "0.1.0"
+edition = "2021"
+description = "Foundational Ethereum/Monad types for monad-core"
+
+[dependencies]
+alloy-primitives = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+mimalloc = { version = "0.1", default-features = false }
