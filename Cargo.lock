@@ -1502,6 +1502,7 @@ name = "monad-evm"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "dashmap",
  "hex",
  "monad-mv-state",
  "monad-nine-fork",
