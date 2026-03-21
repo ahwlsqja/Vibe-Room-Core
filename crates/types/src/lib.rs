@@ -19,12 +19,14 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+pub mod account;
 pub mod block;
 pub mod error;
 pub mod result;
 pub mod transaction;
 
 // Re-export core types at crate root for ergonomic access.
+pub use account::{AccountInfo, KECCAK_EMPTY};
 pub use block::BlockEnv;
 pub use error::EvmError;
 pub use result::{ExecutionResult, Log, Receipt};
