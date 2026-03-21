@@ -21,6 +21,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 hex = "0.4"
 monad-nine-fork = { path = "../nine-fork" }
 monad-scheduler = { path = "../scheduler" }
+
+[[bench]]
+name = "parallel_vs_sequential"
+harness = false
