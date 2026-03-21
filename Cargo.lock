@@ -1510,6 +1510,9 @@ dependencies = [
  "monad-state",
  "monad-types",
  "revm",
+ "revm-inspector",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
