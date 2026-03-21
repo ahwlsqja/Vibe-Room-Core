@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use parking_lot::{Mutex, MutexGuard};
 
 use monad_mv_state::read_write_sets::{ReadSet, WriteSet};
+use monad_types::ExecutionResult;
 
 use crate::types::{Incarnation, SchedulerTask, TxIndex, TxState, TxStatus};
 
@@ -134,14 +135,15 @@ impl Scheduler {
 
     /// Record that execution of `tx_index` at `incarnation` completed.
     ///
-    /// Stores the read/write sets in the transaction's state for later
-    /// validation and publishes the transaction as ready for validation.
+    /// Stores the read/write sets and execution result in the transaction's
+    /// state for later validation and result collection.
     pub fn finish_execution(
         &self,
         tx_index: TxIndex,
         incarnation: Incarnation,
         read_set: ReadSet,
         write_set: WriteSet,
+        result: ExecutionResult,
     ) {
         let mut state = self.tx_states[tx_index as usize].lock();
 
@@ -149,6 +151,7 @@ impl Scheduler {
         if state.incarnation == incarnation {
             state.read_set = Some(read_set);
             state.write_set = Some(write_set);
+            state.result = Some(result);
             state.status = TxStatus::Executed;
         }
 
@@ -181,6 +184,7 @@ impl Scheduler {
             state.incarnation += 1;
             state.read_set = None;
             state.write_set = None;
+            state.result = None;
             state.status = TxStatus::ReadyToExecute;
             drop(state);
 
@@ -194,6 +198,73 @@ impl Scheduler {
 
         self.num_active_tasks.fetch_sub(1, Ordering::SeqCst);
         self.decrease_cnt.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Take the read-set out of a transaction's state for validation.
+    ///
+    /// Returns an empty ReadSet if no read-set is stored (defensive — shouldn't
+    /// happen in normal flow).
+    pub fn take_read_set(&self, tx_index: TxIndex) -> ReadSet {
+        let mut state = self.tx_states[tx_index as usize].lock();
+        state.read_set.take().unwrap_or_default()
+    }
+
+    /// Handle execution completion when an ESTIMATE marker was hit.
+    ///
+    /// The transaction did not complete — no results to publish. Decrements
+    /// the active task count and re-queues the transaction for execution
+    /// by lowering `execution_idx`.
+    pub fn finish_execution_estimate_hit(&self, tx_index: TxIndex) {
+        // Reset status to ReadyToExecute so the tx can be re-claimed.
+        {
+            let mut state = self.tx_states[tx_index as usize].lock();
+            state.status = TxStatus::ReadyToExecute;
+        }
+
+        // Lower execution_idx so this tx is re-dispatched.
+        self.try_lower_execution_idx(tx_index);
+
+        self.num_active_tasks.fetch_sub(1, Ordering::SeqCst);
+        self.decrease_cnt.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Handle execution completion when an infrastructure error occurred.
+    ///
+    /// Stores a Halt result (with gas_used=0) so collect_results can retrieve
+    /// something for every tx_index. The transaction is still marked Executed
+    /// so validation proceeds (and will pass since there are no read conflicts
+    /// for a failed execution).
+    pub fn finish_execution_with_error(
+        &self,
+        tx_index: TxIndex,
+        incarnation: Incarnation,
+        err: monad_types::EvmError,
+    ) {
+        let error_result = ExecutionResult::Halt {
+            gas_used: 0,
+            reason: format!("{:?}", err),
+        };
+        let rs = ReadSet::new();
+        let ws = WriteSet::new();
+        self.finish_execution(tx_index, incarnation, rs, ws, error_result);
+    }
+
+    /// Collect all execution results and write-sets in block order after completion.
+    ///
+    /// Panics if called before `done()` returns true. Takes ownership of stored
+    /// results and write-sets from each TxState.
+    pub fn collect_results(&self) -> Vec<(ExecutionResult, WriteSet)> {
+        let mut results = Vec::with_capacity(self.block_size as usize);
+        for i in 0..self.block_size {
+            let mut state = self.tx_states[i as usize].lock();
+            let result = state.result.take().unwrap_or(ExecutionResult::Halt {
+                gas_used: 0,
+                reason: "No result stored".to_string(),
+            });
+            let write_set = state.write_set.take().unwrap_or_default();
+            results.push((result, write_set));
+        }
+        results
     }
 
     /// Atomically lower `validation_idx` to `new_val` if it's currently higher.
@@ -283,9 +354,17 @@ mod tests {
     use super::*;
     use monad_mv_state::read_write_sets::{ReadSet, WriteSet};
 
-    /// Helper: create empty read/write sets for finish_execution calls.
-    fn empty_sets() -> (ReadSet, WriteSet) {
-        (ReadSet::new(), WriteSet::new())
+    /// Helper: create empty read/write sets and a dummy result for finish_execution calls.
+    fn empty_sets() -> (ReadSet, WriteSet, ExecutionResult) {
+        (
+            ReadSet::new(),
+            WriteSet::new(),
+            ExecutionResult::Success {
+                gas_used: 21_000,
+                output: alloy_primitives::Bytes::new(),
+                logs: vec![],
+            },
+        )
     }
 
     #[test]
@@ -319,8 +398,8 @@ mod tests {
         assert_eq!(task, SchedulerTask::Execute(0, 0));
 
         // Finish execution of tx0 — this should make it available for validation.
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(0, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(0, 0, rs, ws, res);
 
         // Now next_task should prefer Validate(0) over Execute(1) because
         // validation_idx was lowered to 0 by finish_execution.
@@ -338,15 +417,15 @@ mod tests {
 
         // Execute both transactions.
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(0, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(0, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(0, 0, rs, ws, res);
 
         assert_eq!(scheduler.next_task(), SchedulerTask::Validate(0));
         scheduler.finish_validation(0, true);
 
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(1, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(1, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(1, 0, rs, ws, res);
 
         assert_eq!(scheduler.next_task(), SchedulerTask::Validate(1));
         scheduler.finish_validation(1, true);
@@ -361,8 +440,8 @@ mod tests {
 
         // Execute tx0 and immediately validate it (validation priority).
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(0, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(0, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(0, 0, rs, ws, res);
 
         // Validation priority: Validate(0) before Execute(1).
         assert_eq!(scheduler.next_task(), SchedulerTask::Validate(0));
@@ -370,15 +449,15 @@ mod tests {
 
         // Execute tx1.
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(1, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(1, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(1, 0, rs, ws, res);
         assert_eq!(scheduler.next_task(), SchedulerTask::Validate(1));
         scheduler.finish_validation(1, true);
 
         // Execute tx2.
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(2, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(2, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(2, 0, rs, ws, res);
 
         // Execute tx3 before validating tx2 (simulate worker contention).
         // To do this, we manually execute tx3 first, then validate.
@@ -406,12 +485,12 @@ mod tests {
         // Execute tx3 next.
         let task = scheduler.next_task();
         assert_eq!(task, SchedulerTask::Execute(3, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(3, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(3, 0, rs, ws, res);
 
         // Re-execute tx2.
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(2, 1, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(2, 1, rs, ws, res);
 
         // Should validate tx2 (now incarnation 1) — validation priority.
         let task = scheduler.next_task();
@@ -433,8 +512,8 @@ mod tests {
 
         // Execute tx0.
         assert_eq!(scheduler.next_task(), SchedulerTask::Execute(0, 0));
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(0, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(0, 0, rs, ws, res);
 
         // Validate tx0 — fails.
         assert_eq!(scheduler.next_task(), SchedulerTask::Validate(0));
@@ -447,6 +526,7 @@ mod tests {
             assert_eq!(state.status, TxStatus::ReadyToExecute);
             assert!(state.read_set.is_none(), "read_set should be cleared");
             assert!(state.write_set.is_none(), "write_set should be cleared");
+            assert!(state.result.is_none(), "result should be cleared");
         }
 
         // Next task should re-execute tx0 at incarnation 1.
@@ -466,8 +546,8 @@ mod tests {
         assert!(!scheduler.done());
 
         // Finish execution.
-        let (rs, ws) = empty_sets();
-        scheduler.finish_execution(0, 0, rs, ws);
+        let (rs, ws, res) = empty_sets();
+        scheduler.finish_execution(0, 0, rs, ws, res);
 
         // Still not done — needs validation.
         assert!(!scheduler.done());
@@ -494,12 +574,17 @@ mod tests {
             ),
             monad_mv_state::types::WriteValue::Balance(alloy_primitives::U256::from(100)),
         );
-        scheduler.finish_execution(0, 0, rs, ws);
+        scheduler.finish_execution(0, 0, rs, ws, ExecutionResult::Success {
+            gas_used: 21_000,
+            output: alloy_primitives::Bytes::new(),
+            logs: vec![],
+        });
 
         let state = scheduler.get_tx_state(0);
         assert_eq!(state.status, TxStatus::Executed);
         assert!(state.read_set.is_some());
         assert!(state.write_set.is_some());
+        assert!(state.result.is_some());
         assert_eq!(state.write_set.as_ref().unwrap().len(), 1);
     }
 

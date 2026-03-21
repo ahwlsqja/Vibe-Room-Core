@@ -7,6 +7,7 @@
 
 pub use monad_mv_state::types::{Incarnation, TxIndex};
 use monad_mv_state::read_write_sets::{ReadSet, WriteSet};
+use monad_types::ExecutionResult;
 
 /// A task dispatched by the scheduler to a worker thread.
 ///
@@ -65,6 +66,9 @@ pub struct TxState {
     pub read_set: Option<ReadSet>,
     /// Write-set recorded during the most recent execution, applied to MVHashMap.
     pub write_set: Option<WriteSet>,
+    /// Execution result from the most recent execution (Success/Revert/Halt).
+    /// Stored here so `collect_results()` can retrieve it after all txs are validated.
+    pub result: Option<ExecutionResult>,
 }
 
 impl TxState {
@@ -75,6 +79,7 @@ impl TxState {
             incarnation: 0,
             read_set: None,
             write_set: None,
+            result: None,
         }
     }
 }
@@ -96,6 +101,7 @@ mod tests {
         assert_eq!(state.incarnation, 0);
         assert!(state.read_set.is_none());
         assert!(state.write_set.is_none());
+        assert!(state.result.is_none());
     }
 
     #[test]

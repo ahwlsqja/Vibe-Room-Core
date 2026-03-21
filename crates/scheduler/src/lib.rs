@@ -20,11 +20,13 @@
 //! - `Scheduler::block_size()` — number of transactions in the block
 
 pub mod coordinator;
+pub mod parallel_executor;
 pub mod types;
 pub mod worker;
 
 // Re-exports for ergonomic use.
 pub use coordinator::Scheduler;
+pub use parallel_executor::{execute_block_parallel, ParallelExecutionResult};
 pub use types::{Incarnation, SchedulerTask, TxIndex, TxState, TxStatus};
 pub use worker::{
     convert_state_diffs, execute_transaction, validate_transaction, ExecutionOutcome,
