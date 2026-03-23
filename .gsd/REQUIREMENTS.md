@@ -53,9 +53,9 @@
 - Why it matters: NestJS와 Rust 엔진 브릿지. 모나드 생태계(C++/Rust)에 맞는 연동 방식
 - Source: inferred
 - Primary owning slice: M002/S04
-- Supporting slices: none
-- Validation: unmapped
-- Notes: Monode 패턴(Rust 백엔드)과 일치. subprocess 호출
+- Supporting slices: M006/S01
+- Validation: M006-S01: CLI output schema extended with conflict_details field (per_tx R/W access summaries + conflict pairs). 7 monad-cli + 25 monad-scheduler tests pass. Backward compatible.
+- Notes: Monode 패턴(Rust 백엔드)과 일치. subprocess 호출. M006에서 conflict_details 필드 추가.
 
 ### R006 — 실제 EVM 병렬 실행 시뮬레이션 기반 Vibe-Score API
 - Class: differentiator
@@ -64,9 +64,9 @@
 - Why it matters: 정적 분석 대신 실제 EVM 실행 기반 점수. 프로젝트 핵심 차별화
 - Source: user
 - Primary owning slice: M002/S04
-- Supporting slices: M002/S02
-- Validation: unmapped
-- Notes: Hardhat 컴파일 → ABI + bytecode → 엔진에 트랜잭션 블록 구성 → 실행 → 결과 파싱
+- Supporting slices: M002/S02, M006/S02
+- Validation: M006-S02: API /api/vibe-score returns conflictAnalysis with decoded variable names, actionable suggestions, and function×variable matrix. 43 NestJS tests + 16 frontend tests + 5 E2E tests pass. Backward compatible when no conflicts.
+- Notes: Hardhat 컴파일 → ABI + bytecode → 엔진에 트랜잭션 블록 구성 → 실행 → 결과 파싱. M006에서 "점수"→"처방전" 전환: storage layout 디코딩 + actionable suggestion + 매트릭스 히트맵 추가.
 
 ### R007 — PostgreSQL + Prisma 데이터 레이어
 - Class: continuity
@@ -191,8 +191,8 @@
 | R002 | core-capability | active | M002/S02 | none | unmapped |
 | R003 | core-capability | active | M002/S02 | none | unmapped |
 | R004 | core-capability | active | M002/S03 | none | unmapped |
-| R005 | core-capability | active | M002/S04 | none | unmapped |
-| R006 | differentiator | active | M002/S04 | M002/S02 | unmapped |
+| R005 | core-capability | active | M002/S04 | M006/S01 | M006-S01: 7+25 tests, conflict_details JSON |
+| R006 | differentiator | active | M002/S04 | M002/S02, M006/S02 | M006-S02: 43 NestJS + 16 frontend + 5 E2E tests |
 | R007 | continuity | active | M002/S01 | M002/S02, M002/S03 | unmapped |
 | R008 | primary-user-loop | active | M002/S03 | none | unmapped |
 | R009 | integration | active | M002/S05 | none | unmapped |

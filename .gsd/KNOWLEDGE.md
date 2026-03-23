@@ -67,6 +67,16 @@
 **Context:** 기존 E2E 테스트와 새로운 Conflict Analysis E2E 테스트가 서로 다른 EngineService 동작을 필요로 한다 (기존: real service, 신규: mock with conflict_details). 단일 TestingModule에서 override하면 모든 테스트에 영향.
 **Rule:** Provider override가 다른 E2E describe 블록은 각자 독립적인 TestingModule(`createTestingModule → compile → createNestApplication`)을 부트한다. `beforeAll`에서 생성, `afterAll`에서 close. 격리 검증을 위해 `jest.fn()` 타입 체크 테스트 추가 권장.
 
+### Playwright E2E — Promise.race 3-way pattern for deployment-agnostic tests
+**Discovered:** M006-S04 T02 Playwright conflict analysis E2E 작성 시
+**Context:** Playwright E2E 테스트가 production에 M006 Rust 바이너리가 배포되었는지 여부에 관계없이 통과해야 한다. 바이너리가 배포되면 heatmap이 렌더링되고, 안 되면 gauge만 보인다.
+**Rule:** `Promise.race([heatmap_visible, gauge_only, timeout])` 3-way 패턴 사용. 각 branch에 `console.log('[Label]')` 추가하여 CI에서 어떤 경로를 탔는지 grep 가능. 테스트 코드 변경 없이 배포 상태에 따라 자동 전환됨.
+
+### M006 전체 파이프라인 — 3-repo 변경사항은 반드시 각 레포에서 별도 커밋
+**Discovered:** M006 마일스톤 클로즈 시
+**Context:** M006은 monad-core(Rust), Vibe-Room-Backend(NestJS), Vibe-Loom(Frontend) 3개 레포에 동시 변경을 만들었다. monad-core는 GSD 워크트리에서 자동 커밋되지만, Backend/Frontend 변경은 각 레포의 working directory에 unstaged로 존재한다.
+**Rule:** 마일스톤 완료 후 `~/Vibe-Room-Backend`와 `~/Vibe-Loom`에서 각각 `git add . && git commit && git push`를 수행해야 한다. GSD 자동 커밋은 monad-core 레포만 처리한다.
+
 ### VibeScoreDashboard 테스트 — within() 스코핑 필수
 **Discovered:** M006-S03 T02 heatmap + suggestion card 테스트 작성 시
 **Context:** VibeScoreDashboard에 heatmap과 suggestion card가 추가되면서, 함수명(transfer, approve 등)과 변수명(balances, counter 등)이 heatmap 테이블 행/열과 suggestion card 양쪽에 동시 존재한다. `screen.getByText('transfer')`로 찾으면 multiple-elements 에러 발생.
