@@ -108,6 +108,12 @@ S02의 핵심 도메인 로직을 순수 함수 모듈로 구현한다. `storage
 - `Vibe-Room-Backend/src/engine/engine.service.ts` — ConflictDetails, ConflictPair, LocationInfo, TxAccessSummary 인터페이스 (T01에서 정의)
 - `Vibe-Room-Backend/src/vibe-score/dto/vibe-score-result.dto.ts` — DecodedConflict, ConflictMatrix, ConflictAnalysis 인터페이스 (T01에서 정의)
 
+## Observability Impact
+
+- **New inspectable functions:** `decodeSlotToVariable()`, `buildConflictAnalysis()`, `generateSuggestion()`, `buildMatrix()` are all pure exported functions — testable and inspectable without DI.
+- **Failure visibility:** `decodeSlotToVariable()` returns `unknown_slot_0xNNN` on decode failure instead of throwing — agents can grep for "unknown_slot" in API responses to detect decode misses. `buildConflictAnalysis()` returns empty `{ conflicts: [], matrix: { rows: [], cols: [], cells: [] } }` when storageLayout is undefined — no error thrown.
+- **Diagnostic signals:** Test suite validates all edge cases — run `npx jest test/storage-layout-decoder.spec.ts --verbose` to inspect individual test outcomes.
+
 ## Expected Output
 
 - `Vibe-Room-Backend/src/vibe-score/storage-layout-decoder.ts` — decodeSlotToVariable(), buildConflictAnalysis(), generateSuggestion(), buildMatrix() 함수 exports

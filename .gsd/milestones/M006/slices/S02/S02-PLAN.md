@@ -49,7 +49,7 @@
   - Verify: `cd Vibe-Room-Backend && npx jest test/compile.service.spec.ts`
   - Done when: 기존 compile 테스트 전부 통과 + ParallelConflict.sol 컴파일 시 storageLayout.storage에 "counter" 변수 포함 확인
 
-- [ ] **T02: storage-layout-decoder 모듈 구현 + 단위 테스트** `est:45m`
+- [x] **T02: storage-layout-decoder 모듈 구현 + 단위 테스트** `est:45m`
   - Why: 핵심 도메인 로직. hex runtime slot → decimal base slot 변환, mapping heuristic, coinbase 필터링, suggestion 생성, matrix 빌드를 순수 함수로 구현해야 downstream wiring이 가능.
   - Files: `Vibe-Room-Backend/src/vibe-score/storage-layout-decoder.ts`, `Vibe-Room-Backend/test/storage-layout-decoder.spec.ts`
   - Do: (1) decodeSlotToVariable(): hex slot → BigInt 변환, storageLayout.storage 순회하여 exact match (decimal slot == hex slot 비교), mapping/array heuristic (runtime slot > max declared slot → mapping base에 귀속). (2) buildConflictAnalysis(): conflict_details + storageLayout + ABI + tx→function map → decoded conflicts. coinbase 주소 필터링 (대소문자 무시). Storage 타입 conflict만 디코딩 대상. (3) generateSuggestion(): variable type별 구체적 제안 (mapping → "별도 mapping 분리", simple var → "함수별 별도 변수"). (4) buildMatrix(): function×variable 교차점에 conflict count 집계. (5) 8+ 단위 테스트: exact slot match, mapping heuristic, coinbase filter, empty conflicts, suggestion content, matrix dimensions, non-Storage conflict handling, storageLayout undefined.
