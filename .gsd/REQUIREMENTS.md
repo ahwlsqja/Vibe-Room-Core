@@ -174,13 +174,14 @@
 ## Out of Scope
 
 ### R016 — 프론트엔드 UI 재디자인
-- Class: anti-feature
-- Status: out-of-scope
-- Description: 기존 Vibe-Loom UI를 새로 디자인하는 것은 하지 않음. 이관만 함
-- Why it matters: 스코프 제한 — 백엔드 통합에 집중
-- Source: user
-- Primary owning slice: none
-- Validation: n/a
+- Class: differentiator
+- Status: active
+- Description: impeccable 디자인 원칙 기반으로 Vibe-Loom UI를 Refined Technical 심미성으로 전면 재설계. 타이포그래피, 컬러, 스페이싱, 모션 시스템 구축
+- Why it matters: 모나드 생태계 차별화 — "AI가 만든 것 같지 않은" 프로페셔널 품질
+- Source: user (명시적 요청)
+- Primary owning slice: M004/S01
+- Supporting slices: M004/S02, M004/S03, M004/S04
+- Validation: unmapped
 
 ## Traceability
 
@@ -201,11 +202,11 @@
 | R013 | primary-user-loop | active | M002/S03 | M002/S05 | unmapped |
 | R014 | core-capability | deferred | none | none | unmapped |
 | R015 | differentiator | deferred | none | none | unmapped |
-| R016 | anti-feature | out-of-scope | none | none | n/a |
+| R016 | differentiator | active | M004/S01 | M004/S02, M004/S03, M004/S04 | unmapped |
 
 ## Coverage Summary
 
-- Active requirements: 13
-- Mapped to slices: 13
+- Active requirements: 14
+- Mapped to slices: 14
 - Validated: 0
 - Unmapped active requirements: 0
