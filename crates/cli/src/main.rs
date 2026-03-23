@@ -177,7 +177,7 @@ fn main() {
     let results: Vec<TxResultOutput> = par_result
         .tx_results
         .iter()
-        .map(|(exec_result, _write_set)| {
+        .map(|(exec_result, _write_set, _read_set)| {
             let (success, gas_used, output, error, logs_count) = match exec_result {
                 ExecutionResult::Success {
                     gas_used,

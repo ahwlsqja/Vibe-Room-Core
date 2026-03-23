@@ -73,6 +73,12 @@ estimated_files: 3
 - `cargo test -p monad-scheduler` — 기존 24개 + 새 테스트 모두 통과
 - `cargo build -p monad-cli` — CLI 바이너리 빌드 확인 (3-tuple 변경이 CLI 코드에 영향줌 — 컴파일만 확인, 기능은 T02에서)
 
+## Observability Impact
+
+- **What signals change:** `collect_results()` now returns 3-tuples containing ReadSets. Previously ReadSets were dropped after validation — now they are preserved and observable through `ParallelExecutionResult::tx_results`.
+- **How a future agent inspects this task:** Run `cargo test -p monad-scheduler test_read_set_preserved_after_validation` to verify ReadSets are non-empty after parallel execution. Inspect `par_result.tx_results[i].2` (the ReadSet) — empty ReadSet means data loss.
+- **Failure state visibility:** If `return_read_set()` is not called or ReadSet is dropped, `collect_results()` returns `ReadSet::default()` (empty) via `unwrap_or_default()` — observable as `read_set.is_empty() == true` in tests or downstream conflict analysis.
+
 ## Inputs
 
 - `crates/scheduler/src/coordinator.rs` — `Scheduler` struct, `take_read_set()`, `collect_results()`, `finish_validation()` 메서드

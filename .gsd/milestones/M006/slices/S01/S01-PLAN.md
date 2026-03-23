@@ -26,6 +26,7 @@
 - `cargo test -p monad-cli` — conflict detection 단위 테스트 통과
 - `cargo build -p monad-cli` — 바이너리 빌드 성공
 - Integration check: `echo '{"transactions":[{"sender":"0x00000000000000000000000000000000000000E1","to":"0x00000000000000000000000000000000000000F1","data":"0x","value":"1000","gas_limit":100000,"nonce":0,"gas_price":"1000000000"},{"sender":"0x00000000000000000000000000000000000000E1","to":"0x00000000000000000000000000000000000000F2","data":"0x","value":"2000","gas_limit":100000,"nonce":1,"gas_price":"1000000000"}],"block_env":{"number":1,"coinbase":"0x00000000000000000000000000000000000000C0","timestamp":1700000000,"gas_limit":30000000,"base_fee":"0","difficulty":"0"}}' | cargo run -p monad-cli 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'conflict_details' in d; assert 'per_tx' in d['conflict_details']; assert 'conflicts' in d['conflict_details']; print('OK')"` — "OK" 출력
+- Diagnostic/failure-path check: `echo '{"transactions":[],"block_env":{"number":1,"coinbase":"0x00000000000000000000000000000000000000C0","timestamp":1700000000,"gas_limit":30000000,"base_fee":"0","difficulty":"0"}}' | cargo run -p monad-cli 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['results']==[]; assert d['stats']['num_transactions']==0; print('EMPTY_OK')"` — "EMPTY_OK" 출력 (빈 블록에 대한 정상 처리 확인)
 
 ## Observability / Diagnostics
 
@@ -42,7 +43,7 @@
 
 ## Tasks
 
-- [ ] **T01: Preserve ReadSets in scheduler after validation and extend collect_results** `est:1h`
+- [x] **T01: Preserve ReadSets in scheduler after validation and extend collect_results** `est:1h`
   - Why: 현재 `handle_validate()`에서 `take_read_set()` 호출 후 ReadSet이 drop되어 실행 결과에서 접근 불가. conflict analysis의 전제 조건인 ReadSet 보존이 이 슬라이스의 가장 큰 리스크이므로 먼저 해결.
   - Files: `crates/scheduler/src/coordinator.rs`, `crates/scheduler/src/parallel_executor.rs`, `crates/scheduler/src/types.rs`
   - Do: (1) `Scheduler`에 `return_read_set(tx_index, read_set)` 메서드 추가. (2) `handle_validate()`에서 validation 성공 시 `return_read_set()` 호출하여 ReadSet을 TxState에 복원. 실패 시는 호출하지 않음 (tx가 재실행되므로). (3) `collect_results()` 반환 타입을 `Vec<(ExecutionResult, WriteSet, ReadSet)>`로 변경. (4) `ParallelExecutionResult::tx_results`를 3-tuple로 변경. (5) `parallel_executor.rs`의 기존 테스트 코드에서 2-tuple 패턴 매칭을 3-tuple로 업데이트. (6) `test_read_set_preserved_after_validation` 테스트 추가.
