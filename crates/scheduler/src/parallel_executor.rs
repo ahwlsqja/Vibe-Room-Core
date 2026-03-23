@@ -44,6 +44,9 @@ pub struct ParallelExecutionResult {
     /// Accumulated gas fees for the block beneficiary, tracked via side-channel
     /// to avoid false conflicts on the coinbase address.
     pub beneficiary_tracker: LazyBeneficiaryTracker,
+    /// Final incarnation number per transaction. Incarnation > 0 means re-execution
+    /// after a conflict was detected. Useful for CLI output and scoring.
+    pub incarnations: Vec<u32>,
 }
 
 /// Execute a block of transactions in parallel using the Block-STM algorithm.
@@ -81,6 +84,7 @@ pub fn execute_block_parallel(
         return ParallelExecutionResult {
             tx_results: Vec::new(),
             beneficiary_tracker: LazyBeneficiaryTracker::new(),
+            incarnations: Vec::new(),
         };
     }
 
@@ -117,6 +121,9 @@ pub fn execute_block_parallel(
 
     // All workers have joined — collect results in block order.
     let tx_results = scheduler.collect_results();
+    let incarnations: Vec<u32> = (0..block_size)
+        .map(|i| scheduler.get_tx_state(i as u32).incarnation)
+        .collect();
     let beneficiary_tracker = Arc::try_unwrap(beneficiary_tracker)
         .expect("all worker references dropped after scope exit")
         .into_inner()
@@ -125,6 +132,7 @@ pub fn execute_block_parallel(
     ParallelExecutionResult {
         tx_results,
         beneficiary_tracker,
+        incarnations,
     }
 }
 

@@ -1635,6 +1635,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "monad-cli"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "hex",
+ "monad-evm",
+ "monad-scheduler",
+ "monad-state",
+ "monad-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "monad-evm"
 version = "0.1.0"
 dependencies = [

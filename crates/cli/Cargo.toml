@@ -1,0 +1,19 @@
+[package]
+name = "monad-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI binary for monad-core parallel EVM execution engine. Reads JSON from stdin, executes transactions via Block-STM, writes JSON to stdout."
+
+[[bin]]
+name = "monad-cli"
+path = "src/main.rs"
+
+[dependencies]
+monad-types = { path = "../types" }
+monad-state = { path = "../state" }
+monad-scheduler = { path = "../scheduler" }
+monad-evm = { path = "../evm" }
+alloy-primitives = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+hex = "0.4"
